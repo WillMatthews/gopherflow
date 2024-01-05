@@ -1,2 +1,2 @@
 # GopherFlow
-It's tinygrad but in go. Go figure.
+It's micrograd but in go. Go figure.
