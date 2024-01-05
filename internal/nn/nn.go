@@ -2,58 +2,124 @@ package nn
 
 import (
     "fmt"
+    "math/rand"
     "github.com/WillMatthews/gopherflow/internal/engine"
 )
 
-type MLP struct {
-    layers []*Layer
+type Neuron struct {
+    weight float64
+    bias float64
+    activation string
 }
 
-func NewMLP() *MLP {
-    return &MLP{}
+func (n *Neuron) newNeuron( activation string, N int) *Neuron {
+    weights := make([]Value, N)
+    for i := 0; i < N; i++ {
+        weights[i] = Value{data: rand.Float64()*2-1}
+    }
+
+    return &Neuron{
+        weight: weights,
+        bias: Value{data: 0},
+        activation: activation,
+    }
+}
+
+func (n *Neuron) run(inputs []float64) float64 {
+    sum := 0.0
+    for i := 0; i < len(inputs); i++ {
+        sum += inputs[i] * n.weight[i]
+    }
+
+    result := sum + n.bias
+
+    switch n.activation {
+    case "relu":
+        return Relu(result)
+    case "sigmoid":
+        return Sigmoid(result)
+    case "tanh":
+        return Tanh(result)
+    default:
+        return result
+}
+
+func (n *Neuron) params() []Value {
+    return append(n.weight, n.bias)
 }
 
 type Layer struct {
-    neurons []*Neuron
+    neurons []Neuron
 }
 
-type Neuron struct {
-}
-
-
-
-// nn activation functions
-
-func relu(x float64) float64 {
-    if x < 0 {
-        return 0
+func (l *Layer) newLayer(activation string, Ni, No int) *Layer {
+    neurons := make([]Neuron, No)
+    for i := 0; i < No; i++ {
+        neurons[i] = Neuron.newNeuron(activation, Ni)
     }
-    return x
-}
 
-func leakyRelu(x float64) float64 {
-    if x < 0 {
-        return 0.01 * x
+    return &Layer{
+        neurons: neurons,
     }
-    return x
 }
 
-func tanh(x float64) float64 {
-    return (1 - x) / (1 + x)
-}
-
-func sigmoid(x float64) float64 {
-    return 1 / (1 + x)
-}
-
-func softmax(x float64) float64 {
-    return 1 / (1 + x)
-}
-
-func (m *MLP) AddLayer(n int, activation string) {
-    l := &Layer{}
-    for i := 0; i < n; i++ {
-        l.neurons = append(l.neurons, &Neuron{})
+func (l *Layer) run(inputs []float64) []float64 {
+    outputs := make([]float64, len(l.neurons))
+    for i := 0; i < len(l.neurons); i++ {
+        outputs[i] = l.neurons[i].run(inputs)
     }
-    m.layers = append(m.layers, l)
+
+    return outputs
 }
+
+func (l *Layer) params() []Value {
+    params := make([]Value, 0)
+    for i := 0; i < len(l.neurons); i++ {
+        params = append(params, l.neurons[i].params()...)
+    }
+
+    return params
+}
+
+type MLP struct {
+    layers []Layer
+}
+
+func (m *MLP) newMLP(activation string, Ni, Nh, No int) *MLP {
+    layers := make([]Layer, 2)
+    layers[0] = Layer.newLayer(activation, Ni, Nh)
+    layers[1] = Layer.newLayer(activation, Nh, No)
+
+    return &MLP{
+        layers: layers,
+    }
+}
+
+func (m *MLP) run(inputs []float64) []float64 {
+    outputs := inputs
+    for i := 0; i < len(m.layers); i++ {
+        outputs = m.layers[i].run(outputs)
+    }
+
+    return outputs
+}
+
+func (m *MLP) params() []Value {
+    params := make([]Value, 0)
+    for i := 0; i < len(m.layers); i++ {
+        params = append(params, m.layers[i].params()...)
+    }
+
+    return params
+}
+
+func (m *MLP) loss(inputs []float64, targets []float64) float64 {
+    outputs := m.run(inputs)
+    loss := 0.0
+    for i := 0; i < len(outputs); i++ {
+        loss += (outputs[i] - targets[i]) * (outputs[i] - targets[i])
+    }
+
+    return loss
+}
+

@@ -18,6 +18,7 @@ type Value struct {
     op string
     label string
     grad float64
+    back func()
 }
 
 func newValue(data float64) *Value {
@@ -50,6 +51,10 @@ func (v *Value) Add(other *Value) *Value {
     nv := newValue(v.data + other.data)
     nv.children = []*Value{v, other}
     nv.op = "+"
+    nv.back = func() {
+        v.grad += nv.grad
+        other.grad += nv.grad
+    }
     return nv
 }
 
@@ -57,6 +62,10 @@ func (v *Value) Mul(other *Value) *Value {
     nv := newValue(v.data * other.data)
     nv.children = []*Value{v, other}
     nv.op = "*"
+    nv.back = func() {
+        v.grad += other.data * nv.grad
+        other.grad += v.data * nv.grad
+    }
     return nv
 }
 
@@ -64,6 +73,10 @@ func (v *Value) Div(other *Value) *Value {
     nv := newValue(v.data / other.data)
     nv.children = []*Value{v, other}
     nv.op = "/"
+    nv.back = func() {
+        v.grad += (1 / other.data) * nv.grad
+        other.grad += (v.data / (other.data * other.data)) * nv.grad
+    }
     return nv
 }
 
@@ -71,44 +84,63 @@ func (v *Value) Pow(other *Value) *Value {
     nv := newValue(math.Pow(v.data, other.data))
     nv.children = []*Value{v, other}
     nv.op = "^"
+    nv.back = func() {
+        v.grad += (other.data * math.Pow(v.data, other.data - 1)) * nv.grad
+        other.grad += (math.Pow(v.data, other.data) * math.Log(v.data)) * nv.grad
+    }
     return nv
 }
 
 
 // activation functions
 func (v *Value) tanh() *Value {
-    nv := newValue(tanh(v.data))
+    nv := newValue(Tanh(v.data))
     nv.children = []*Value{v}
     nv.op = "tanh"
+    nv.back = func() {
+        t := Tanh(v.data)
+        v.grad += (1 - t * t) * nv.grad
+    }
     return nv
 }
 
 func (v *Value) sigmoid() *Value {
-    nv := newValue(sigmoid(v.data))
+    nv := newValue(Sigmoid(v.data))
     nv.children = []*Value{v}
     nv.op = "sigmoid"
+    nv.back = func() {
+        s := Sigmoid(v.data)
+        v.grad += (s * (1 - s)) * nv.grad
+    }
     return nv
 }
 
 func (v *Value) relu() *Value {
-    nv := newValue(relu(v.data))
+    nv := newValue(Relu(v.data))
     nv.children = []*Value{v}
     nv.op = "relu"
+    nv.back = func() {
+        if v.data < 0 {
+            v.grad += 0
+        } else {
+            v.grad += 1 * nv.grad
+        }
+    }
     return nv
 }
 
 
 
 // methods
-func tanh(x float64) float64 {
+func Tanh(x float64) float64 {
     return (1 - x) / (1 + x)
 }
 
-func sigmoid(x float64) float64 {
+func Sigmoid(x float64) float64 {
     return 1 / (1 + x)
 }
 
-func relu(x float64) float64 {
+func Relu(x float64) float64 {
     if x < 0 {
         return 0
     }
@@ -128,25 +160,8 @@ func (v *Value) backward() {
     if v.children == nil {
         return
     }
-
-    for i, child := range v.children {
-        switch v.op {
-        case "+":
-            child.grad += v.grad
-        case "*":
-            // Assume there are only two children..?
-            child.grad += v.grad * v.children[(i+1)%2].data
-        case "tanh":
-            child.grad += v.grad * (1 - v.data * v.data)
-        case "sigmoid":
-            child.grad += v.grad * v.data * (1 - v.data)
-        case "relu":
-            if v.data < 0 {
-                child.grad += 0
-            } else {
-                child.grad += v.grad
-            }
-        }
+    v.back()
+    for _, child := range v.children {
         child.backward()
     }
 }
@@ -170,11 +185,11 @@ func (v *Value) forward() {
     
     // activation functions
     case "tanh":
-        v.data = tanh(v.children[0].data)
+        v.data = Tanh(v.children[0].data)
     case "sigmoid":
-        v.data = sigmoid(v.children[0].data)
+        v.data = Sigmoid(v.children[0].data)
     case "relu":
-        v.data = relu(v.children[0].data)
+        v.data = Relu(v.children[0].data)
     }
 
 }
@@ -183,46 +198,15 @@ func (v *Value) forward() {
 
 // demo Run() function
 func (eng *Engine) Run() {
-    var a, b, c, d, e, f *Value
-    a = newLabelValue(1, "a")
-    b = newLabelValue(2, "b")
-    c = newLabelValue(3, "c")
-    d = a.Add(b) // 1 + 2
-    e = d.Mul(c) // (1 + 2) * 3
-    f = e.Add(d) // (1 + 2) * 3 + (1 + 2)
-    out := f.tanh()
-    
-    // print out the tree
-    fmt.Println(out)
-    fmt.Println(f.children[0])
-    fmt.Println(f.children[1])
-    fmt.Println(f.children[0].children[0])
-    fmt.Println(f.children[0].children[1])
-    fmt.Println(f.children[1].children[0])
-    fmt.Println(f.children[1].children[1])
-
-    // forward pass
+    a := newLabelValue(1, "a")
+    b := newLabelValue(2, "b")
+    out := a.Mul(b).tanh()
     out.Forward()
-    fmt.Println("forward pass")
-    fmt.Println(f.data)
-    fmt.Println(f.children[0].data)
-    fmt.Println(f.children[1].data)
-    fmt.Println(f.children[0].children[0].data)
-    fmt.Println(f.children[0].children[1].data)
-    fmt.Println(f.children[1].children[0].data)
-    fmt.Println(f.children[1].children[1].data)
 
-    // backward pass
     out.Backward()
-    fmt.Println("backward pass")
-    fmt.Println(f.grad)
-    fmt.Println(f.children[0].grad)
-    fmt.Println(f.children[1].grad)
-    fmt.Println(f.children[0].children[0].grad)
-    fmt.Println(f.children[0].children[1].grad)
-    fmt.Println(f.children[1].children[0].grad)
-    fmt.Println(f.children[1].children[1].grad)
-
+    fmt.Println("grads:")
+    fmt.Println("a:", a.grad)
+    fmt.Println("b:", b.grad)
 
 }
 
